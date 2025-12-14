@@ -1,0 +1,176 @@
+========================================
+ESTRUCTURA DEL PROYECTO
+========================================
+
+agente_identificador_contactos_mvp/
+│
+├── 📄 main.py                          # Punto de entrada - Orchestrator principal
+├── 📄 requirements.txt                 # Dependencias Python
+├── 📄 pytest.ini                       # Configuración de tests
+├── 📄 Dockerfile                       # Imagen Docker del bot
+├── 📄 docker-compose.yml               # Orquestación de servicios
+├── 📄 .env.example                     # Variables de entorno de ejemplo
+├── 📄 .gitignore                       # Archivos ignorados por Git
+├── 📄 README.md                        # Documentación principal
+├── 📄 DEPLOY.md                        # Guía de despliegue
+├── 📄 prd.md                           # Product Requirements Document
+│
+├── 📁 config/                          # Configuración del sistema
+│   ├── __init__.py
+│   └── settings.py                     # Settings con Pydantic
+│
+├── 📁 src/                             # Código fuente
+│   ├── __init__.py
+│   │
+│   ├── 📁 models/                      # Modelos de datos
+│   │   ├── __init__.py
+│   │   └── contact.py                  # Modelo Contact con validaciones
+│   │
+│   ├── 📁 validators/                  # Validadores
+│   │   ├── __init__.py
+│   │   ├── message_validator.py        # Validación de mensajes Telegram
+│   │   └── contact_validator.py        # Validación de datos de contacto
+│   │
+│   ├── 📁 utils/                       # Utilidades
+│   │   ├── __init__.py
+│   │   ├── logger.py                   # Logging estructurado (structlog)
+│   │   ├── rate_limiter.py             # Rate limiting por usuario
+│   │   └── helpers.py                  # Funciones auxiliares (vCard, sanitización)
+│   │
+│   ├── 📁 services/                    # Servicios externos
+│   │   ├── __init__.py
+│   │   ├── gemini_service.py           # Cliente Google Gemini API
+│   │   ├── contacts_api.py             # Cliente PostgreSQL (SQLAlchemy)
+│   │   └── telegram_service.py         # Cliente Telegram Bot API
+│   │
+│   └── 📁 agents/                      # Agentes del sistema
+│       ├── __init__.py
+│       ├── security_agent.py           # Validación, autenticación, sanitización
+│       └── persistence_agent.py        # Guardado en BD + notificaciones
+│
+├── 📁 tests/                           # Suite de tests
+│   ├── __init__.py
+│   ├── conftest.py                     # Fixtures compartidos
+│   ├── 📁 unit/                        # Tests unitarios
+│   │   ├── __init__.py
+│   │   ├── test_models.py
+│   │   ├── test_validators.py
+│   │   └── test_security_agent.py
+│   └── 📁 integration/                 # Tests de integración
+│       └── __init__.py
+│
+├── 📁 scripts/                         # Scripts auxiliares
+│   ├── init_db.sql                     # Script SQL de inicialización
+│   └── init_db.py                      # Script Python de inicialización
+│
+├── 📁 docs/                            # Documentación adicional
+│
+└── 📁 logs/                            # Logs de la aplicación
+
+
+========================================
+COMPONENTES PRINCIPALES
+========================================
+
+1. CAPA DE ENTRADA
+   - TelegramService: Maneja comunicación con Telegram
+   - Comandos: /start, /help, /health
+   - Handlers: Mensajes de texto
+
+2. AGENTE DE SEGURIDAD (SecurityAgent)
+   - Autenticación (whitelist)
+   - Rate limiting (10 req/min)
+   - Validación de mensajes
+   - Sanitización de datos (OWASP)
+   - Coordinación con Gemini
+
+3. PROCESAMIENTO IA (GeminiService)
+   - Extracción de entidades (nombre, teléfono, referido)
+   - Normalización de datos
+   - Manejo de errores y timeouts
+
+4. AGENTE DE PERSISTENCIA (PersistenceAgent)
+   - Guardado en PostgreSQL
+   - Generación de vCard (.vcf)
+   - Botón inline de Telegram
+   - Notificaciones al usuario
+
+5. BASE DE DATOS (PostgreSQL)
+   - Tabla: contacts
+   - Índices optimizados
+   - Triggers para updated_at
+
+
+========================================
+FUNCIONALIDAD CRÍTICA
+========================================
+
+Al guardar un contacto exitosamente:
+
+1. ✅ Se guarda en PostgreSQL
+2. 📧 Se envía confirmación al usuario
+3. 📇 Se envía archivo vCard (.vcf) para importar
+4. 🔘 Se envía botón "Agregar a Contactos" de Telegram
+
+
+========================================
+TECNOLOGÍAS
+========================================
+
+Backend:
+- Python 3.11+
+- python-telegram-bot 21.0
+- google-generativeai 0.5.0
+- SQLAlchemy 2.0.27
+- Pydantic 2.6.0
+- structlog 24.1.0
+
+Base de Datos:
+- PostgreSQL 15
+
+Infraestructura:
+- Docker
+- Docker Compose
+
+Testing:
+- pytest
+- pytest-asyncio
+- pytest-cov
+
+
+========================================
+COMANDOS ÚTILES
+========================================
+
+# Iniciar con Docker
+docker-compose up -d
+
+# Ver logs
+docker-compose logs -f bot
+
+# Ejecutar tests
+pytest
+
+# Ejecutar tests con cobertura
+pytest --cov=src --cov-report=html
+
+# Inicializar BD
+python scripts/init_db.py
+
+# Ejecutar localmente
+python main.py
+
+
+========================================
+CARACTERÍSTICAS DE SEGURIDAD
+========================================
+
+✓ Whitelist de usuarios
+✓ Rate limiting (10 req/min/usuario)
+✓ Sanitización de inputs (OWASP)
+✓ Logging de accesos no autorizados
+✓ Bloqueo automático tras intentos fallidos
+✓ Variables de entorno para credenciales
+✓ Usuario no-root en Docker
+✓ Validación de datos en múltiples capas
+
