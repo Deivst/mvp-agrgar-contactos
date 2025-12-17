@@ -1,8 +1,8 @@
 """
-Servicio de integración con Google Gemini API.
+Servicio de integración con OpenAI API.
 
 Este módulo maneja la extracción de entidades de contactos
-usando el modelo Gemini de Google.
+usando el modelo GPT de OpenAI.
 """
 
 import json
@@ -10,7 +10,7 @@ import re
 from typing import Dict, Any, Optional
 import asyncio
 
-import google.generativeai as genai
+from openai import AsyncOpenAI
 
 from ..utils.logger import get_logger
 
@@ -38,56 +38,44 @@ JSON:"""
 
 class GeminiService:
     """
-    Servicio para extracción de entidades usando Google Gemini.
+    Servicio para extracción de entidades usando OpenAI GPT.
 
     Attributes:
-        api_key: API key de Google Gemini.
+        api_key: API key de OpenAI.
         model_name: Nombre del modelo a utilizar.
         timeout: Timeout en segundos para las peticiones.
-        model: Instancia del modelo de Gemini.
+        client: Cliente asíncrono de OpenAI.
     """
 
     def __init__(
         self,
         api_key: str,
-        model_name: str = "gemini-1.5-flash",
+        model_name: str = "gpt-4-mini",
         timeout: int = 30
     ):
         """
-        Inicializa el servicio de Gemini.
+        Inicializa el servicio de OpenAI.
 
         Args:
-            api_key: API key de Google Gemini.
-            model_name: Nombre del modelo (default: gemini-1.5-flash).
+            api_key: API key de OpenAI.
+            model_name: Nombre del modelo (default: gpt-4-mini).
             timeout: Timeout en segundos (default: 30).
 
         Example:
-            >>> service = GeminiService(api_key="your-api-key")
+            >>> service = GeminiService(api_key="sk-...")
         """
         self.api_key = api_key
         self.model_name = model_name
         self.timeout = timeout
 
-        # Configurar Gemini
-        genai.configure(api_key=api_key)
-
-        # Configuración de generación para forzar respuestas JSON
-        generation_config = {
-            "temperature": 0.1,  # Baja temperatura para respuestas más deterministas
-            "top_p": 0.95,
-            "top_k": 40,
-            "max_output_tokens": 1024,
-        }
-
-        self.model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config=generation_config
-        )
+        # Crear cliente asíncrono de OpenAI
+        self.client = AsyncOpenAI(api_key=api_key)
 
         logger.info(
             "gemini_service_initialized",
             model_name=model_name,
-            timeout=timeout
+            timeout=timeout,
+            provider="openai"
         )
 
     async def extract_contact_info(self, message_text: str) -> Dict[str, Any]:
@@ -122,17 +110,17 @@ class GeminiService:
             # Preparar el prompt
             prompt = EXTRACTION_PROMPT.format(message=message_text)
 
-            # Llamar a Gemini API de forma asíncrona con timeout
+            # Llamar a OpenAI API de forma asíncrona con timeout
             response = await asyncio.wait_for(
-                self._call_gemini_async(prompt),
+                self._call_openai_async(prompt),
                 timeout=self.timeout
             )
 
             # Extraer y parsear la respuesta
-            response_text = response.text.strip()
+            response_text = response.choices[0].message.content.strip()
 
             logger.debug(
-                "gemini_response_received",
+                "openai_response_received",
                 response_length=len(response_text)
             )
 
@@ -140,10 +128,10 @@ class GeminiService:
             contact_data = self._parse_json_response(response_text)
 
             if not contact_data:
-                logger.error("failed_to_parse_gemini_response")
+                logger.error("failed_to_parse_openai_response")
                 return {
                     "success": False,
-                    "error": "No se pudo parsear la respuesta de Gemini"
+                    "error": "No se pudo parsear la respuesta de OpenAI"
                 }
 
             # Normalizar teléfono
@@ -166,41 +154,49 @@ class GeminiService:
 
         except asyncio.TimeoutError:
             logger.error(
-                "gemini_timeout",
+                "openai_timeout",
                 timeout=self.timeout
             )
             return {
                 "success": False,
-                "error": f"Timeout al procesar con Gemini ({self.timeout}s)"
+                "error": f"Timeout al procesar con OpenAI ({self.timeout}s)"
             }
 
         except Exception as e:
             logger.error(
-                "gemini_extraction_failed",
+                "openai_extraction_failed",
                 error=str(e),
                 error_type=type(e).__name__
             )
             return {
                 "success": False,
-                "error": f"Error al procesar con Gemini: {str(e)}"
+                "error": f"Error al procesar con OpenAI: {str(e)}"
             }
 
-    async def _call_gemini_async(self, prompt: str):
+    async def _call_openai_async(self, prompt: str):
         """
-        Llama a la API de Gemini de forma asíncrona.
+        Llama a la API de OpenAI de forma asíncrona.
 
         Args:
-            prompt: Prompt a enviar a Gemini.
+            prompt: Prompt a enviar a OpenAI.
 
         Returns:
-            Respuesta de Gemini.
+            Respuesta de OpenAI.
         """
-        # Ejecutar la llamada síncrona en un thread pool
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            self.model.generate_content,
-            prompt
+        return await self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a JSON extraction assistant. You respond with valid JSON only, no markdown, no explanations."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.1,
+            max_tokens=1024
         )
 
     def _parse_json_response(self, response_text: str) -> Optional[Dict[str, Any]]:
