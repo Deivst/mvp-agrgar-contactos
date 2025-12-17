@@ -8,11 +8,12 @@ y maneja el bot de Telegram.
 import asyncio
 from typing import Optional
 
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
     ContextTypes
 )
@@ -120,6 +121,11 @@ class ContactsOrchestrator:
         # Handler para comando /health
         self.application.add_handler(
             CommandHandler("health", self.health_command)
+        )
+
+        # Handler para callbacks de confirmación
+        self.application.add_handler(
+            CallbackQueryHandler(self.handle_confirmation, pattern="^(confirm|reject)_")
         )
 
         # Handler para mensajes de texto (procesamiento de contactos)
@@ -279,7 +285,7 @@ O más informal:
         """
         Handler principal para mensajes de texto.
 
-        Procesa el mensaje a través del SecurityAgent y PersistenceAgent.
+        Extrae la información del contacto y pide confirmación del usuario.
 
         Args:
             update: Update de Telegram.
@@ -305,7 +311,7 @@ O más informal:
             "username": user.username
         }
 
-        # Procesar con SecurityAgent
+        # Procesar con SecurityAgent (validación y extracción)
         security_result = await self.security_agent.process_request(message_data)
 
         if not security_result["success"]:
@@ -335,27 +341,138 @@ O más informal:
             contact_nombre=contact_data["nombre"]
         )
 
-        # Guardar y notificar con PersistenceAgent
-        persistence_result = await self.persistence_agent.save_and_notify(
-            contact_data=contact_data,
-            chat_id=chat_id
+        # Preparar mensaje de confirmación
+        confirmation_message = self._format_contact_for_confirmation(contact_data)
+
+        # Crear botones de confirmación
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Sí, agregarlo", callback_data=f"confirm_{user.id}_{chat_id}"),
+                InlineKeyboardButton("❌ No, cancelar", callback_data=f"reject_{user.id}_{chat_id}")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # Guardar la información del contacto en el contexto del usuario
+        if not hasattr(context, "user_data"):
+            context.user_data = {}
+        
+        context.user_data[f"pending_contact_{user.id}"] = {
+            "contact": contact_data,
+            "chat_id": chat_id,
+            "user_id": user.id
+        }
+
+        # Enviar mensaje de confirmación
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=confirmation_message,
+            reply_markup=reply_markup
         )
 
-        if not persistence_result["success"]:
-            logger.error(
-                "persistence_failed",
-                user_id=user.id,
-                error=persistence_result.get("error")
-            )
-            # El PersistenceAgent ya envió el mensaje de error al usuario
+    def _format_contact_for_confirmation(self, contact_data: dict) -> str:
+        """
+        Formatea los datos del contacto para mostrar al usuario.
+
+        Args:
+            contact_data: Diccionario con datos del contacto.
+
+        Returns:
+            Mensaje formateado.
+        """
+        nombre = contact_data.get("nombre", "N/A")
+        telefono = contact_data.get("telefono", "N/A")
+        referido = contact_data.get("quien_lo_recomendo", "N/A")
+
+        message = f"""📋 Por favor confirma estos datos:
+
+👤 Nombre: {nombre}
+📞 Teléfono: {telefono}
+👥 Recomendado por: {referido}
+
+¿Estás de acuerdo en agregar este contacto a tu libreta?"""
+
+        return message
+
+    async def handle_confirmation(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """
+        Handler para la confirmación o rechazo del contacto.
+
+        Args:
+            update: Update de Telegram.
+            context: Contexto de la conversación.
+        """
+        query = update.callback_query
+        user_id = query.from_user.id
+        chat_id = query.message.chat_id
+        
+        # Obtener los datos del contacto pendiente
+        pending_key = f"pending_contact_{user_id}"
+        if pending_key not in context.user_data:
+            await query.answer("❌ La sesión expiró. Por favor intenta de nuevo.", show_alert=True)
             return
 
-        logger.info(
-            "contact_processed_successfully",
-            user_id=user.id,
-            contact_id=persistence_result["contact_id"],
-            contact_nombre=contact_data["nombre"]
-        )
+        pending_contact = context.user_data[pending_key]
+        contact_data = pending_contact["contact"]
+
+        # Confirmar presión del botón
+        await query.answer()
+
+        if query.data.startswith("confirm_"):
+            # Usuario confirmó - guardar contacto
+            logger.info(
+                "contact_confirmation_accepted",
+                user_id=user_id,
+                contact_nombre=contact_data["nombre"]
+            )
+
+            # Actualizar el mensaje a "Guardando..."
+            await query.edit_message_text(
+                text="⏳ Guardando contacto en tu libreta..."
+            )
+
+            # Guardar en la BD
+            persistence_result = await self.persistence_agent.save_and_notify(
+                contact_data=contact_data,
+                chat_id=chat_id
+            )
+
+            if not persistence_result["success"]:
+                logger.error(
+                    "persistence_failed",
+                    user_id=user_id,
+                    error=persistence_result.get("error")
+                )
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"❌ Error al guardar: {persistence_result.get('error')}"
+                )
+                return
+
+            # Después de guardar exitosamente, actualizar mensaje
+            await query.edit_message_text(
+                text=f"✅ ¡Contacto guardado exitosamente!\n\n👤 {contact_data['nombre']}\n📞 {contact_data['telefono']}\n👥 Recomendado por: {contact_data['quien_lo_recomendo']}"
+            )
+
+        elif query.data.startswith("reject_"):
+            # Usuario rechazó - cancelar
+            logger.info(
+                "contact_confirmation_rejected",
+                user_id=user_id,
+                contact_nombre=contact_data["nombre"]
+            )
+
+            await query.edit_message_text(
+                text="❌ Contacto cancelado. No fue agregado a tu libreta."
+            )
+
+        # Limpiar datos del contacto pendiente
+        if pending_key in context.user_data:
+            del context.user_data[pending_key]
 
     async def run(self) -> None:
         """Inicia el bot de Telegram."""

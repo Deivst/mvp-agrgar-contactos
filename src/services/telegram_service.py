@@ -99,12 +99,10 @@ class TelegramService:
         confirmation_message: str
     ) -> bool:
         """
-        Envía un contacto guardado con vCard y botón de Telegram.
+        Envía un vCard para agregar automáticamente el contacto a la libreta.
 
-        Esta es la funcionalidad CRÍTICA del sistema que permite al usuario
-        agregar el contacto a su libreta de dos formas:
-        1. Descargando el archivo vCard (.vcf)
-        2. Usando el botón inline de Telegram
+        Esta es la forma más automática: al abrir el vCard en el teléfono,
+        automáticamente pregunta si desea agregarlo a contactos.
 
         Args:
             chat_id: ID del chat de destino.
@@ -128,56 +126,21 @@ class TelegramService:
             True
         """
         try:
-            # 1. Enviar mensaje de confirmación
-            await self.send_message(chat_id, confirmation_message)
-
-            # 2. Generar y enviar archivo vCard
+            # Generar vCard
             vcard_content = generate_vcard(nombre, telefono, quien_lo_recomendo)
             vcard_bytes = vcard_to_bytes(vcard_content)
-            vcard_bytes.name = f"{nombre.replace(' ', '_')}.vcf"
 
+            # Enviar el vCard como documento con nombre .vcf
+            # Cuando el usuario lo toca, automáticamente abre la opción de agregar a contactos
             await self.bot.send_document(
                 chat_id=chat_id,
                 document=vcard_bytes,
                 filename=f"{nombre.replace(' ', '_')}.vcf",
-                caption="📇 Archivo vCard - Toca para agregar a tus contactos"
+                caption=f"📇 {nombre}\n☝️ Toca para agregar automáticamente a tus contactos"
             )
 
             logger.info(
-                "vcard_sent",
-                chat_id=chat_id,
-                nombre=nombre
-            )
-
-            # 3. Enviar contacto usando la API NATIVA de Telegram (send_contact)
-            # Esto es la forma MÁS automática posible - aparece directamente
-            # como contacto que el usuario puede guardar con un toque
-
-            # Separar nombre en first_name y last_name
-            nombre_parts = nombre.strip().split(maxsplit=1)
-            first_name = nombre_parts[0] if len(nombre_parts) > 0 else nombre
-            last_name = nombre_parts[1] if len(nombre_parts) > 1 else ""
-
-            # Normalizar teléfono para Telegram (quitar el +)
-            phone_for_telegram = telefono.replace("+", "")
-
-            # Enviar contacto nativo de Telegram
-            await self.bot.send_contact(
-                chat_id=chat_id,
-                phone_number=phone_for_telegram,
-                first_name=first_name,
-                last_name=last_name,
-                vcard=None  # Ya enviamos el vCard antes
-            )
-
-            # Enviar mensaje explicativo
-            await self.bot.send_message(
-                chat_id=chat_id,
-                text="☝️ Toca el contacto de arriba y luego 'Agregar a Contactos' para guardarlo automáticamente"
-            )
-
-            logger.info(
-                "contact_button_sent",
+                "vcard_sent_for_auto_save",
                 chat_id=chat_id,
                 nombre=nombre
             )
@@ -186,7 +149,7 @@ class TelegramService:
 
         except Exception as e:
             logger.error(
-                "failed_to_send_contact_with_vcard",
+                "failed_to_send_vcard",
                 chat_id=chat_id,
                 error=str(e)
             )
