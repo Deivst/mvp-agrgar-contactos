@@ -1,0 +1,60 @@
+nombre: Nota de Recepción
+descripcion: Comprobante de recepción de mercancías
+
+campos_obligatorios:
+  - numero_recepcion:
+      tipo: string
+      patron: "^REC-\\d{8}$"
+      ejemplo: "REC-20250115"
+
+  - fecha_recepcion:
+      tipo: date
+      formato: "YYYY-MM-DD"
+      validacion: "no_futuro"
+
+  - referencia_pedido:
+      tipo: string
+      descripcion: "Número de pedido original"
+
+  - referencia_albaran:
+      tipo: string
+      descripcion: "Número de albarán asociado"
+      validacion: "debe_existir_albaran"
+
+  - proveedor:
+      tipo: string
+
+  - productos_recibidos:
+      tipo: array
+      schema:
+        - codigo: string
+        - descripcion: string
+        - cantidad_esperada: integer
+        - cantidad_recibida: integer
+        - estado: enum [correcto, dañado, faltante]
+        - observaciones: string
+
+  - discrepancias:
+      tipo: boolean
+      descripcion: "true si hay diferencias entre esperado y recibido"
+
+  - firma_receptor:
+      tipo: boolean
+
+  - observaciones_calidad:
+      tipo: string
+      opcional: true
+
+regiones_documento:
+  - cabecera: [0, 0, 1000, 200]
+  - referencias: [0, 200, 1000, 300]
+  - tabla_productos: [0, 300, 1000, 850]
+  - pie: [0, 850, 1000, 1000]
+
+palabras_clave:
+  - "NOTA DE RECEPCIÓN"
+  - "NOTA DE RECEPCION"
+  - "RECEPCIÓN"
+  - "RECEPCION"
+  - "RECEIVING NOTE"
+  - "GOODS RECEIVED"
